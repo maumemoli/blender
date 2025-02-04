@@ -2,6 +2,7 @@ import bpy
 import bmesh
 print("EDGE SEQUENCE IMPORTED")
 
+
 class EdgeSequence(object):
     def __init__(self, obj: bpy.types.Object):
         '''
@@ -111,13 +112,16 @@ class EdgeSequence(object):
         Set the UV coordinates of the inner loops
         :param uv_coords: The UV coordinates to set
         '''
+        print("++++++==========================++++++")
         print("Loops:{0}".format(len(loops)))
+        
         print("UV Coords:{0}".format(len(uv_coords)))
         if len(loops) != len(uv_coords):
             print("The number of loops: {0} and UV coordinates {1} do not match".format(len(loops), len(uv_coords)))
             return
         for i in range(len(loops)):
-            sub_loops = self.inner_loops[i]
+            sub_loops = loops[i]
+            print("Changing UV coordinates for loops: {0}".format(", ".join([str(l.index) for l in sub_loops])))
             for loop in sub_loops:
                 loop[self.uv_layer].uv = uv_coords[i]
         # update the mesh
