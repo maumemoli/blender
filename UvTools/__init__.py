@@ -52,7 +52,6 @@ class UVAlignSeams(bpy.types.Operator):
 
         self.source_obj = None
         self.active_obj = None
-
         self.source_edge_sequence = None
         self.active_edge_sequence = None
         # draw handlers
@@ -95,6 +94,7 @@ class UVAlignSeams(bpy.types.Operator):
     def initialize_meshes(self):
         self.source_obj = None
         self.active_obj = None
+        
         active_obj = bpy.context.active_object
         other_meshes = [x for x in bpy.context.selected_objects if x.type == "MESH" and x != active_obj]
         if len(other_meshes) == 1:
@@ -103,6 +103,7 @@ class UVAlignSeams(bpy.types.Operator):
 
         if self.source_obj and self.active_obj:
             self.source_edge_sequence = EdgeSequence(self.source_obj)
+            
             print("=======================================")
             print(self.source_edge_sequence.parametric_coordinates)
             self.active_edge_sequence = EdgeSequence(self.active_obj)
@@ -110,11 +111,11 @@ class UVAlignSeams(bpy.types.Operator):
             self.active_edge_sequence.pin_inner_loops()
 
     def invoke(self, context, event):
-
+        bpy.ops.ed.undo_push(message="Store initial state")
         if context.area.type == 'VIEW_3D':
             # Get selected edges and linked faces from the active object
             self.initialize_meshes()
-
+            
             if not self.source_obj or not self.active_obj:
                 self.report({'WARNING'}, "Select two meshes")
                 return {'CANCELLED'}
@@ -134,10 +135,14 @@ class UVAlignSeams(bpy.types.Operator):
         return {'CANCELLED'}
 
     def modal(self, context, event):
+        self.execute(context)
         if event.type in ['RIGHTMOUSE', 'ESC'] and event.value == 'PRESS':
             # Exit modal when Right Mouse is pressed
+            # undo the execution
+            bpy.ops.ed.undo()
             self.unregister_draw_handler(context)
             self.report({'INFO'}, "User cancelled the operation.")
+    
             context.area.tag_redraw()
             return {'CANCELLED'}
 
@@ -147,7 +152,7 @@ class UVAlignSeams(bpy.types.Operator):
             self.unregister_draw_handler(context)
             # redraw the view
             context.area.tag_redraw()
-            self.execute(context)
+            
             return {'FINISHED'}
 
         # Allow navigation
