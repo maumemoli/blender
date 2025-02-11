@@ -59,18 +59,24 @@ class UVAlignSeams(bpy.types.Operator):
 
         self.start_edges_batch = None
         self.edges_batch = None
+        self.selected_edges_batch = None
         self.inside_faces_batch = None
         self.outside_faces_batch = None
+        self.active_outline_faces_batch = None
+        self.source_outline_faces_batch = None
 
+        self.selected_edges_shader = None
         self.edges_shader = None
         self.start_edges_shader = None
-        self.inside_face_shader = None
-        self.outside_face_shader = None
+        self.inside_faces_shader = None
+        self.outside_faces_shader = None
+        self.active_outline_faces_shader = None
+        self.source_outline_faces_shader = None
 
         # This is to draw the shaders
         self.selected_edges = []
-        self.outside_face_shader_tris = []
-        self.inside_face_shader_tris = []
+        self.outside_faces_shader_tris = []
+        self.inside_faces_shader_tris = []
         # colors
         edge_color = bpy.context.preferences.themes[0].view_3d.edge_mode_select
         self.selected_edge_color = (edge_color.r, edge_color.g, edge_color.b, 1.0)
@@ -82,6 +88,7 @@ class UVAlignSeams(bpy.types.Operator):
         self.outside_face_color = (face_back[0], face_back[1], face_back[2], face_back[3])
 
         self.invert_inside = False
+        self.swap_meshes = False
 
         self.x_key_short_cut = None
 
@@ -92,23 +99,24 @@ class UVAlignSeams(bpy.types.Operator):
         return context.object is not None and context.object.mode == 'EDIT' and len(selected_meshes) == 2
 
     def initialize_meshes(self):
-        self.source_obj = None
-        self.active_obj = None
+        if self.source_edge_sequence:
+            self.source_edge_sequence.clear()
+        if self.active_edge_sequence:
+            self.active_edge_sequence.clear()
         
         active_obj = bpy.context.active_object
         other_meshes = [x for x in bpy.context.selected_objects if x.type == "MESH" and x != active_obj]
+
         if len(other_meshes) == 1:
             self.source_obj = other_meshes[0]
             self.active_obj = active_obj
 
         if self.source_obj and self.active_obj:
             self.source_edge_sequence = EdgeSequence(self.source_obj)
-            
-            print("=======================================")
-            print(self.source_edge_sequence.parametric_coordinates)
             self.active_edge_sequence = EdgeSequence(self.active_obj)
-            self.active_edge_sequence.pin_outer_loops()
-            self.active_edge_sequence.pin_inner_loops()
+
+        else:
+            print("SOMETHING WENT WRONG")
 
     def invoke(self, context, event):
         bpy.ops.ed.undo_push(message="Store initial state")
@@ -120,9 +128,12 @@ class UVAlignSeams(bpy.types.Operator):
                 self.report({'WARNING'}, "Select two meshes")
                 return {'CANCELLED'}
 
-            self.inside_face_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
-            self.outside_face_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.inside_faces_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.outside_faces_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.active_outline_faces_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.source_outline_faces_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
             self.edges_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
+            self.selected_edges_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
             self.start_edges_shader = gpu.shader.from_builtin('UNIFORM_COLOR')
             self.update_selection()
 
@@ -159,20 +170,18 @@ class UVAlignSeams(bpy.types.Operator):
         if event.type in ['MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'MOUSEMOVE']:
             return {'PASS_THROUGH'}
 
-        # Redraw if selection changes
-        obj = context.active_object
-
-        if not (obj and obj.type == 'MESH' and obj.mode == 'EDIT'):
-            self.unregister_draw_handler(context)
-            self.report({'INFO'}, "Exited edit mode, terminating modal operator.")
-            return {'FINISHED'}
-
-        if event.type in ["SPACE", "TAB"] and event.value == 'PRESS':
-            print("PRESSING SPACE OR TAB")
+        if event.type == "TAB" and event.value == 'PRESS':
             self.invert_inside = not self.invert_inside
-
-        if obj and obj.type == 'MESH':
             self.update_selection()
+
+        if event.type == 'SPACE' and event.value == 'PRESS':
+            print("pressing space")
+            self.swap_meshes = not self.swap_meshes
+            self.source_edge_sequence.restore_uv_coords()
+            self.active_edge_sequence.restore_uv_coords()
+            self.update_selection()
+
+
 
         # Allow panning and rotating the viewport
         return {'RUNNING_MODAL'}
@@ -188,8 +197,20 @@ class UVAlignSeams(bpy.types.Operator):
             if self.invert_inside != self.source_edge_sequence.inverted:
                 self.source_edge_sequence.inverted = self.invert_inside
                 self.source_edge_sequence.load()
-        self.inside_faces_batch = self.create_face_batch(inner_faces_co, self.inside_face_shader)
-        self.outside_faces_batch = self.create_face_batch(outer_faces_co, self.outside_face_shader)
+        self.inside_faces_batch = self.create_face_batch(inner_faces_co, self.inside_faces_shader)
+        self.outside_faces_batch = self.create_face_batch(outer_faces_co, self.outside_faces_shader)
+        self.active_outline_faces_batch = batch_for_shader(self.active_outline_faces_shader,
+                                                           'TRIS',
+                                                           {"pos": self.active_edge_sequence.deformed_verts_postion.tolist()},
+                                                           indices=self.active_edge_sequence.outline_faces_indices.tolist())
+        self.source_outline_faces_batch = batch_for_shader(self.source_outline_faces_shader,
+                                                           'TRIS',
+                                                           {"pos": self.source_edge_sequence.deformed_verts_postion.tolist()},
+                                                           indices=self.source_edge_sequence.outline_faces_indices.tolist())
+        selected_edges_co = self.source_edge_sequence.selected_edges_batch_coords
+        selected_edges_co.extend(self.active_edge_sequence.selected_edges_batch_coords)
+        self.selected_edges_batch = batch_for_shader(self.selected_edges_shader, 'LINES', {"pos": selected_edges_co})
+
         edges_co = self.source_edge_sequence.edges_batch_coords
         edges_co.extend(self.active_edge_sequence.edges_batch_coords)
         self.edges_batch = batch_for_shader(self.edges_shader, 'LINES', {"pos": edges_co})
@@ -200,24 +221,69 @@ class UVAlignSeams(bpy.types.Operator):
         self.start_edges_batch = batch_for_shader(self.start_edges_shader, 'LINES', {"pos": start_edges_co})
 
     def draw_callback(self, context):
-        if self.inside_faces_batch:
-            self.inside_face_shader.bind()
-            self.inside_face_shader.uniform_float("color", self.inside_face_color)
-            self.inside_faces_batch.draw(self.inside_face_shader)
+        if self.swap_meshes:
+            active_outline_color = (0.8,0.8,0.8,1)
+            source_outline_color = (1,1,1,1)
+        else:
+            active_outline_color = (1,1,1,1)
+            source_outline_color = (0.8,0.8,0.8,1)
 
-        if self.outside_faces_batch:
-            self.outside_face_shader.bind()
-            self.outside_face_shader.uniform_float("color", self.outside_face_color)
-            self.outside_faces_batch.draw(self.outside_face_shader)
+        if self.active_outline_faces_shader:
+            self.active_outline_faces_shader.bind()
+            self.active_outline_faces_shader.uniform_float("color", active_outline_color)
+            gpu.state.face_culling_set('NONE')
+            gpu.state.depth_mask_set(True)
+            gpu.state.blend_set("NONE")
+            gpu.state.depth_test_set("LESS")
+            self.active_outline_faces_batch.draw(self.active_outline_faces_shader)
+
+        if self.source_outline_faces_shader:
+            self.source_outline_faces_shader.bind()
+            self.source_outline_faces_shader.uniform_float("color", source_outline_color)
+            gpu.state.depth_mask_set(True)
+            gpu.state.face_culling_set('NONE')
+            gpu.state.blend_set("NONE")
+            gpu.state.depth_test_set("LESS")
+            self.source_outline_faces_batch.draw(self.source_outline_faces_shader)
 
         if self.edges_batch:
             self.edges_shader.bind()
-            self.edges_shader.uniform_float("color", self.selected_edge_color)
+            self.edges_shader.uniform_float("color",(0,0,0,1))
+            gpu.state.face_culling_set('NONE')
+            gpu.state.blend_set("NONE")
+            gpu.state.depth_test_set("LESS_EQUAL")
             self.edges_batch.draw(self.edges_shader)
+
+        if self.inside_faces_batch:
+            self.inside_faces_shader.bind()
+            self.inside_faces_shader.uniform_float("color", self.inside_face_color)
+            gpu.state.face_culling_set('BACK')
+            gpu.state.blend_set("NONE")
+            gpu.state.depth_test_set("LESS_EQUAL")
+            self.inside_faces_batch.draw(self.inside_faces_shader)
+
+        if self.outside_faces_batch:
+            self.outside_faces_shader.bind()
+            self.outside_faces_shader.uniform_float("color", self.outside_face_color)
+            gpu.state.face_culling_set('BACK')
+            #gpu.state.blend_set("INVERT")
+            gpu.state.depth_test_set("LESS_EQUAL")
+            self.outside_faces_batch.draw(self.outside_faces_shader)
+
+        if self.selected_edges_batch:
+
+            self.selected_edges_shader.bind()
+            gpu.state.face_culling_set('BACK')
+            gpu.state.depth_test_set("LESS")
+            gpu.state.line_width_set(3.0)
+            self.selected_edges_shader.uniform_float("color", (1.0,1.0,1.0,1.0))
+            self.selected_edges_batch.draw(self.selected_edges_shader)
 
         if self.start_edges_batch:
             self.start_edges_shader.bind()
-            self.start_edges_shader.uniform_float("color", self.start_edge_color)
+            gpu.state.depth_test_set("NONE")
+            gpu.state.line_width_set(5.0)
+            self.start_edges_shader.uniform_float("color", (0.0,1.0 ,1.0,1.0))
             self.start_edges_batch.draw(self.start_edges_shader)
 
     def register_draw_handler(self, context):
@@ -225,7 +291,7 @@ class UVAlignSeams(bpy.types.Operator):
             self.draw_callback, (context,), 'WINDOW', 'POST_VIEW')
 
         # Set the header text
-        context.area.header_text_set("UV Seams: Press Right Mouse or Escape to Exit\r Enter to confirm selection. \r TAB or Space bar to invert the inside faces")
+        context.area.header_text_set("Right Mouse or Escape to Exit. Enter to confirm selection. TAB to invert the inside faces. SPACE to swap the source with the active mesh.")
 
         context.window_manager.modal_handler_add(self)
 
@@ -239,6 +305,7 @@ class UVAlignSeams(bpy.types.Operator):
         vertices = []
         indices = []
         index_offset = 0
+
         for face in faces:
             vertices.extend(face)
             # Create triangle indices for each face
@@ -249,39 +316,31 @@ class UVAlignSeams(bpy.types.Operator):
 
     # modal end
     def execute(self, context):
+        if self.swap_meshes:
+            source_sequence = self.active_edge_sequence
+            active_sequence = self.source_edge_sequence
+        else:
+            source_sequence = self.source_edge_sequence
+            active_sequence = self.active_edge_sequence
+
         # Get the list of selected objects
         inner_uv_coords = []
         outer_uv_coords = []
-        if self.source_edge_sequence.inner_uv_coords:
-            inner_uv_coords = self.source_edge_sequence.inner_uv_coords
-            print("Inner UV coords found")
+        if source_sequence.inner_uv_coords:
+            inner_uv_coords = source_sequence.inner_uv_coords
 
-        if self.source_edge_sequence.outer_uv_coords:
-            outer_uv_coords = self.source_edge_sequence.outer_uv_coords
-            print("Outer UV coords found")
+        if source_sequence.outer_uv_coords:
+            outer_uv_coords = source_sequence.outer_uv_coords
 
         if inner_uv_coords:
-            transferred_inner_uv_coords = self.active_edge_sequence.transfer_uv_coordinates(inner_uv_coords)
-            print("====================================")
-            print("Active  inner loops: ")
-            for loop in self.active_edge_sequence.inner_loops:
-                print("Loops:")
-                for subloop in loop:
-                    print(subloop.index)
-            self.active_edge_sequence.set_inner_loops_uv_coordinates(transferred_inner_uv_coords)
-            print(inner_uv_coords)
+            transferred_inner_uv_coords = active_sequence.transfer_uv_coordinates(inner_uv_coords)
+
+            active_sequence.set_inner_loops_uv_coordinates(transferred_inner_uv_coords)
+            active_sequence.pin_inner_loops()
         if outer_uv_coords:
-            transferred_outer_uv_coords = self.active_edge_sequence.transfer_uv_coordinates(outer_uv_coords)
-            print("====================================")
-            print("Active  outer loops: ")
-            for loop in self.active_edge_sequence.outer_loops:
-                print("Loops: ")
-                for subloop in loop:
-                    print(subloop.index)
-            self.active_edge_sequence.set_outer_loops_uv_coordinates(transferred_outer_uv_coords)
-            print(outer_uv_coords)
-        else:
-            print("No outer coordinates to transfer")
+            transferred_outer_uv_coords = active_sequence.transfer_uv_coordinates(outer_uv_coords)
+            active_sequence.set_outer_loops_uv_coordinates(transferred_outer_uv_coords)
+            active_sequence.pin_outer_loops()
 
         return {'FINISHED'}
 

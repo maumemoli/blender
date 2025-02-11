@@ -1,6 +1,7 @@
 import bpy
 import bmesh
-print("EDGE SEQUENCE IMPORTED")
+import numpy as np
+
 
 
 class EdgeSequence(object):
@@ -20,16 +21,74 @@ class EdgeSequence(object):
         self.outer_faces = []
         self.active_edge_batch_coords = []
         self.edges_batch_coords = []
+        self.selected_edges_batch_coords = []
         self.inner_faces_batch_coords = []
         self.outer_faces_batch_coords = []
-        self.deformed_verts_postion = self.get_deformed_mesh_verts_positions()
+        self.deformed_verts_postion = []
+        self.outline_faces_indices = []
         self.parametric_coordinates = []
         self.inner_loops = []
         self.outer_loops = []
         self.is_border = False
         self.inner_uv_coords = []
         self.outer_uv_coords = []
+        self.original_loops_uv_coords = {}
+
         self.load()
+        self.store_uv_coords()
+
+    def store_uv_coords(self):
+        if self.inner_loops:
+            for loop_list in self.inner_loops:
+                for loop in loop_list:
+                    self.original_loops_uv_coords[loop.index] = loop[self.uv_layer].uv.copy()
+        if self.outer_loops:
+            for loop_list in self.outer_loops:
+                for loop in loop_list:
+                    self.original_loops_uv_coords[loop.index] = loop[self.uv_layer].uv.copy()
+
+    def restore_uv_coords(self):
+        '''
+        Restore the UV coordinates of the selected edges
+        '''
+        if self.original_loops_uv_coords:
+            if self.inner_loops:
+                for loop_list in self.inner_loops:
+                    for loop in loop_list:
+                        uv = self.original_loops_uv_coords[loop.index]
+                        loop[self.uv_layer].uv = uv
+            if self.outer_loops:
+                for loop_list in self.outer_loops:
+                    for loop in loop_list:
+                        loop[self.uv_layer].uv = self.original_loops_uv_coords[loop.index]
+            bmesh.update_edit_mesh(self.obj.data)
+
+    def clear(self):
+        '''
+        Clear the object's selected edges
+        '''
+        if self.bm and isinstance(self.bm, bmesh.types.BMesh):
+            self.bm.free()
+        self.bm = None
+        self.edges.clear()
+        self.inverted_edges.clear()
+        self.corner_edges.clear()
+        self.inner_faces.clear()
+        self.outer_faces.clear()
+        self.active_edge_batch_coords.clear()
+        self.edges_batch_coords.clear()
+        self.selected_edges_batch_coords.clear()
+        self.inner_faces_batch_coords.clear()
+        self.outer_faces_batch_coords.clear()
+        # self.deformed_verts_postion.clear()
+        # self.outline_faces_indices.clear()
+        self.parametric_coordinates.clear()
+        self.inner_loops.clear()
+        self.outer_loops.clear()
+        self.is_border = False
+        self.inner_uv_coords.clear()
+        self.outer_uv_coords.clear()
+
 
     def load(self):
         '''
@@ -40,12 +99,21 @@ class EdgeSequence(object):
             self.bm.free()
 
         if self. obj.mode == "EDIT":
+            self.get_deformed_mesh_verts_positions()
             self.bm = bmesh.from_edit_mesh(self.obj.data)
             self.bm.faces.ensure_lookup_table()
             self.bm.edges.ensure_lookup_table()
             self.bm.verts.ensure_lookup_table()
             self.uv_layer = self.bm.loops.layers.uv.active
-            self.edges = [e for e in self.bm.edges if e.select]
+            unselected_edges = []
+            # let's store the uv coordinates for the active layer
+
+
+            for edge in self.bm.edges:
+                if edge.select:
+                    self.edges.append(edge)
+                else:
+                    unselected_edges.append(edge)
             self.is_border = any([e.is_boundary for e in self.edges])
             self.get_ordered_edges_sequence()
             self.get_inner_faces()
@@ -54,9 +122,10 @@ class EdgeSequence(object):
                 edges = [self.edges[0]]
                 self.active_edge_batch_coords = self.get_edges_batch_coords(edges)
                 self.parametric_coordinates = self.get_parametric_coordinates()
+            self.edges_batch_coords = self.get_edges_batch_coords(unselected_edges)
             if len(self.edges) > 1:
                 edges = self.edges[1:]
-                self.edges_batch_coords = self.get_edges_batch_coords(edges)
+                self.selected_edges_batch_coords = self.get_edges_batch_coords(edges)
             if len(self.inner_faces) > 0:
                 self.inner_faces_batch_coords = self.get_faces_batch_coords(self.inner_faces)
             if len(self.outer_faces) > 0:
@@ -68,7 +137,6 @@ class EdgeSequence(object):
                 self.outer_loops = self.get_edges_faces_related_loops(self.edges, self.outer_faces)
                 self.outer_uv_coords = self.get_uv_coordinates(self.edges, self.outer_faces, self.uv_layer)
 
-
     def transfer_uv_coordinates(self, uv_coords):
         '''
         Transfer the UV coordinates to the mesh
@@ -76,7 +144,6 @@ class EdgeSequence(object):
         '''
         uv_parametric_coords = self.convert_to_parametric_coordinates(uv_coords)
         transferred_uv_coords = []
-        print("Parametric coordinates are: {0}".format(len(self.parametric_coordinates)))
         for co in self.parametric_coordinates:
             for i in range(len(uv_parametric_coords)-1):
                 current = uv_parametric_coords[i]
@@ -106,27 +173,20 @@ class EdgeSequence(object):
         '''
         self.set_loops_uv_coordinates(self.outer_loops, uv_coords)
 
-
     def set_loops_uv_coordinates(self, loops, uv_coords):
         '''
         Set the UV coordinates of the inner loops
         :param uv_coords: The UV coordinates to set
         '''
-        print("++++++==========================++++++")
-        print("Loops:{0}".format(len(loops)))
-        
-        print("UV Coords:{0}".format(len(uv_coords)))
         if len(loops) != len(uv_coords):
             print("The number of loops: {0} and UV coordinates {1} do not match".format(len(loops), len(uv_coords)))
             return
         for i in range(len(loops)):
             sub_loops = loops[i]
-            print("Changing UV coordinates for loops: {0}".format(", ".join([str(l.index) for l in sub_loops])))
             for loop in sub_loops:
                 loop[self.uv_layer].uv = uv_coords[i]
         # update the mesh
         bmesh.update_edit_mesh(self.obj.data)
-
 
     def pin_inner_loops(self):
         '''
@@ -157,7 +217,6 @@ class EdgeSequence(object):
                 loop[self.uv_layer].pin_uv = True
         # update the mesh
         bmesh.update_edit_mesh(self.obj.data)
-
 
     def unpin_outer_loops(self):
         '''
@@ -240,22 +299,27 @@ class EdgeSequence(object):
     def get_deformed_mesh_verts_positions(self):
         '''
         Get the deformed mesh vertices positions
-        :return: The deformed mesh vertices positions
         '''
         # Get the evaluated object with all deformations applied
         depsgraph = bpy.context.evaluated_depsgraph_get()
         evaluated_obj = self.obj.evaluated_get(depsgraph)
-
         # Get the final mesh data
         mesh = evaluated_obj.to_mesh()
+        mesh.calc_loop_triangles()
 
-        # Get the deformed vertex positions
-        vertex_positions = [v.co.copy() for v in mesh.vertices]
+        vp = np.zeros((len(mesh.vertices) * 3,), dtype=np.float32, )
+        mesh.vertices.foreach_get('co', vp)
+        vp = vp.reshape((-1, 3))
 
-        # Free the temporary evaluated mesh
+        fs = np.zeros((len(mesh.loop_triangles) * 3, ), dtype=np.int32, )
+        mesh.loop_triangles.foreach_get('vertices', fs)
+        fs.shape = (-1, 3, )
+        self.outline_faces_indices = fs
+        # multiplicate by the matrix world to get the global coordinates
+        world_matrix = np.array(self.obj.matrix_world)
+        self.deformed_verts_postion = self.transform_vertices_array(vp, world_matrix)
+
         evaluated_obj.to_mesh_clear()
-
-        return vertex_positions
 
     def get_ordered_edges_sequence(self):
         '''
@@ -293,12 +357,11 @@ class EdgeSequence(object):
         Get the batch coordinates of the edges
         :return:
         '''
-        world_matrix = self.obj.matrix_world
         batch_coords = []
         for edge in edges:
             for vert in edge.verts:
-                deformed_vert = self.deformed_verts_postion[vert.index]
-                batch_coords.append(world_matrix @ deformed_vert)
+                deformed_vert = self.deformed_verts_postion[vert.index].tolist()
+                batch_coords.append(deformed_vert)
         return batch_coords
 
     def get_faces_batch_coords(self, faces):
@@ -307,13 +370,12 @@ class EdgeSequence(object):
         :param faces: The faces to get the coordinates from
         :return:
         '''
-        world_matrix = self.obj.matrix_world
         faces_coords = []
         for face in faces:
             coords = []
             for vert in face.verts:
                 deformed_vert = self.deformed_verts_postion[vert.index]
-                coords.append(world_matrix @ deformed_vert)
+                coords.append(deformed_vert)
             faces_coords.append(coords)
 
         return faces_coords
@@ -349,7 +411,6 @@ class EdgeSequence(object):
                 coordinates.append(verts[1].co.copy())
         return coordinates
 
-
     @staticmethod
     def convert_to_parametric_coordinates(coordinates):
         """
@@ -373,7 +434,6 @@ class EdgeSequence(object):
         :return:
         '''
         start_loop_idx = 1 if self.inverted else 0
-        print("Getting inner face and the loop id is: {0}".format(start_loop_idx))
         self.inner_faces = self.get_border_faces(start_loop_idx)
 
     def get_outer_faces(self):
@@ -381,8 +441,6 @@ class EdgeSequence(object):
         Get the outer faces of the edge sequence
         :return:
         '''
-        print("GETTING OUTER FACES OF THE EDGE SEQUENCE")
-        print("The edge sequence is border: {0}".format(self.is_border))
         if self.is_border:
             return []
         start_loop_idx = 0 if self.inverted else 1
@@ -436,16 +494,6 @@ class EdgeSequence(object):
         is_ordered = first_edge.verts[1] in second_edge.verts
         # print("Is ordered: {0}".format(is_ordered))
         shared_vert = first_edge.verts[is_ordered]
-        loop_idx = not is_ordered
-        # the link_loops hold the contiguous faces
-        # current_face = first_edge.link_loops[loop_idx].face
-        #
-        # if start_face:
-        #     if start_face != current_face:
-        #         current_face = first_edge.link_loops[is_ordered].face
-        #     if current_face != start_face:
-        #         print("**ERROR: Current face {0} does not match the start face: {1}".format(current_face.index,
-        #                                                                                     start_face.index))
         current_face = None
         for loop in first_edge.link_loops:
 
@@ -495,3 +543,11 @@ class EdgeSequence(object):
                     continue
                 connected_faces.append(link_face)
         return connected_faces
+
+
+    @staticmethod
+    def transform_vertices_array(array, mat):
+        verts_co_4d = np.ones(shape=(array.shape[0] , 4) , dtype=np.float32)
+        verts_co_4d[: , :-1] = array  # cos v (x,y,z,1) - point,   v(x,y,z,0)- vector
+        local_transferred_position = np.einsum ('ij,aj->ai' , mat , verts_co_4d)
+        return local_transferred_position[:, :3]
