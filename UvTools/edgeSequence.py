@@ -242,6 +242,20 @@ class EdgeSequence(object):
             return False
 
     @staticmethod
+    def is_edge_uv_boundary(edge, uv_layer):
+        '''
+        Check if the edge is a UV boundary
+        :return: True if the edge is a UV boundary, False otherwise
+        '''
+        if edge.is_boundary:
+            return True
+        half_edge_1 = edge.link_loops[0]
+        half_edge_2 = edge.link_loops[1]
+        if half_edge_1[uv_layer].uv != half_edge_2.link_loop_next[uv_layer].uv or half_edge_2[uv_layer].uv != half_edge_1.link_loop_next[uv_layer].uv:
+            return True
+        return False
+
+    @staticmethod
     def get_uv_coordinates(edges, faces, uv_layer):
         '''
         Get the UV coordinates of the edges filtered by the faces
