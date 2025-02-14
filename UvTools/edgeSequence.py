@@ -1,7 +1,7 @@
 import bpy
 import bmesh
 import numpy as np
-
+from mathutils import Vector
 
 
 class EdgeSequence(object):
@@ -242,18 +242,57 @@ class EdgeSequence(object):
             return False
 
     @staticmethod
+    def inset_point(point, previous_point, next_point, inset_distance, normal=Vector((0.0, 0.0, 1.0))):
+        """
+        inset a point based on previous and next coordinates
+        """
+
+        # Compute edge vectors
+        edge1 = (point - previous_point).normalized()
+        edge2 = (next_point - point).normalized()
+
+        # Compute bisector direction
+        bisector = (edge1 + edge2).normalized()
+        print("Bisector")
+        print(bisector)
+        # Compute perpendicular in plane
+        perp = bisector.cross(normal).normalized()
+
+        print("Perpendicular")
+        print(perp)
+
+        if bisector == perp:
+            print("Bisector and Perp are equ")
+
+        # Compute correct inset distance using sine rule
+        angle = edge1.angle(-edge2) / 2  # Half of the inner angle
+        scale_factor = inset_distance / max(0.001, math.sin(angle))
+
+        # Compute inset position
+        inset_point = point + perp * scale_factor
+        return inset_point
+
+
+    @staticmethod
     def is_edge_uv_boundary(edge, uv_layer):
         '''
         Check if the edge is a UV boundary
         :return: True if the edge is a UV boundary, False otherwise
         '''
         if edge.is_boundary:
-            return True
+            return True, True
         half_edge_1 = edge.link_loops[0]
         half_edge_2 = edge.link_loops[1]
-        if half_edge_1[uv_layer].uv != half_edge_2.link_loop_next[uv_layer].uv or half_edge_2[uv_layer].uv != half_edge_1.link_loop_next[uv_layer].uv:
-            return True
-        return False
+        half_edge_1_border = False
+        half_edge_2_border = False
+        if half_edge_1[uv_layer].uv != half_edge_2.link_loop_next[uv_layer].uv:
+            half_edge_1_border = True
+        if half_edge_2[uv_layer].uv != half_edge_1.link_loop_prev[uv_layer].uv:
+            half_edge_2_border = True
+
+        return half_edge_1_border, half_edge_2_border
+
+
 
     @staticmethod
     def get_uv_coordinates(edges, faces, uv_layer):
@@ -266,13 +305,16 @@ class EdgeSequence(object):
             previous_edge = edges[i - 1] if i > 0 else None
             edge = edges[i]
             next_edge = edges[i + 1] if i + 1 < len(edges) else None
+            verts_boundaries = EdgeSequence.is_edge_uv_boundary(edge, uv_layer)
             verts = [edge.verts[0], edge.verts[1]]
             if next_edge:
                 if verts[1] not in next_edge.verts:
                     verts = verts[::-1]
+                    verts_boundaries = verts_boundaries[::-1]
             elif previous_edge:
                 if verts[0] not in previous_edge.verts:
                     verts = verts[::-1]
+                    verts_boundaries = verts_boundaries[::-1]
             for vert in verts:
                 for loop in vert.link_loops:
                     if loop.face in faces:
