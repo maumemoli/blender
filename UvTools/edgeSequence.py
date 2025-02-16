@@ -3,6 +3,22 @@ import bmesh
 import numpy as np
 from mathutils import Vector
 
+class EdgePoint(object):
+    def __init__(self, vert: bmesh.types.vert, bm: bmesh.types.BMesh):
+        '''
+        Constructor
+        :param vert: The vertex
+        :param uv: The UV loop
+        '''
+        self.vert = vert
+        self.bm = bm
+        self.next_edge = None
+        self.previous_edge = None
+        self.inner_faces = []
+        self.outer_faces = []
+        
+
+
 
 class EdgeSequence(object):
     def __init__(self, obj: bpy.types.Object):
