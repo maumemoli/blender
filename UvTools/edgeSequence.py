@@ -4,7 +4,13 @@ import numpy as np
 from mathutils import Vector
 
 class EdgePoint(object):
-    def __init__(self, vert: bmesh.types.vert, bm: bmesh.types.BMesh):
+    def __init__(self, 
+                 vert: bmesh.types.BMVert,
+                 bm: bmesh.types.BMesh, 
+                 edge: bmesh.types.BMEdge,
+                 connected_edge = None,
+                 inner_faces = [],
+                 outer_faces = []):
         '''
         Constructor
         :param vert: The vertex
@@ -12,12 +18,59 @@ class EdgePoint(object):
         '''
         self.vert = vert
         self.bm = bm
-        self.next_edge = None
-        self.previous_edge = None
-        self.inner_faces = []
-        self.outer_faces = []
+        self.edge = edge
+        self.connected_edge = connected_edge # this is the edge in the sequence connected to the vertex
+        self.inner_faces = inner_faces
+        self.outer_faces = outer_faces
+        self.loop = self.get_vert_loop()
+        self.active_uv = bm.loops.layers.uv.active
         
 
+    def get_inner_faces(self):
+        '''
+        Get the inner of the edge sequence
+        :return:
+        '''
+        if self.next_edge is None:
+            return [self.loop.face]
+        start_face = self.loop.face
+        self.inner_faces = self.get_faces_between_edges(self.edge, self.connected_edge, start_face)
+
+    def get_outer_faces(self):
+        '''
+        Get the outer faces of the edge sequence
+        :return:
+        '''
+        other_loop = self.edge.link_loops[0] if self.edge.link_loops[0] != self.loop else self.edge.link_loops[1]
+        if self.next_edge is None:
+            return [other_loop.face] 
+        start_face = self.loop.face
+        self.outer_faces = self.get_faces_between_edges(self.edge, self.connected_edge, start_face)
+
+
+    def get_vert_loop(self):
+        '''
+        Get the vertex loop
+        :return: The vertex loop
+        '''
+        for loop in self.edge.link_loops:
+            if loop.vert == self.vert:
+                return loop
+        return None
+
+    @property
+    def is_uv_boundary(self):
+        '''
+        Check if the point is UV boundary
+        :return: True if the edge is a UV boundary, False otherwise
+        '''
+        uv_layer = self.bm.loops.layers.uv.active
+        if self.edge.is_boundary:
+            return True
+        other_loop = self.edge.link_loops[0] if self.edge.link_loops[0] != self.loop else self.edge.link_loops[1]
+        if self.loop[uv_layer].uv != other_loop.link_loop_next[uv_layer].uv:
+            return True
+        return False
 
 
 class EdgeSequence(object):
@@ -389,7 +442,7 @@ class EdgeSequence(object):
         self.outline_faces_indices = fs
         # multiplicate by the matrix world to get the global coordinates
         world_matrix = np.array(self.obj.matrix_world)
-        self.deformed_verts_postion = self.transform_vertices_array(vp, world_matrix)
+        self.deformed_verts_postion = transform_vertices_array(vp, world_matrix)
 
         evaluated_obj.to_mesh_clear()
 
@@ -529,7 +582,9 @@ class EdgeSequence(object):
             start_face = current_edge.link_loops[start_loop_idx].face
             if paresed_faces:
                 start_face = paresed_faces[-1]
-            connected_faces = self.get_faces_between_edges(current_edge, next_edge, start_face)
+            connected_faces = get_faces_between_edges(current_edge,
+                                                           next_edge,
+                                                           start_face)
 
             for face in connected_faces:
                 if face not in paresed_faces:
@@ -554,72 +609,71 @@ class EdgeSequence(object):
             return None
         return selected_edges[0]
 
-    def get_faces_between_edges(self, first_edge, second_edge, start_face=None):
-        '''
-        Find the connected faces and orders them based on the drawing order of the faces
-        '''
-        # print("=====================================")
-        start_face_index = start_face.index if start_face else None
-        # print("EDGES: ({0}, {1} Start face: {2})".format(first_edge.index, second_edge.index, start_face_index))
-        # let's find the shared vertex and the
-        connected_faces = []
-        is_ordered = first_edge.verts[1] in second_edge.verts
-        # print("Is ordered: {0}".format(is_ordered))
-        shared_vert = first_edge.verts[is_ordered]
-        current_face = None
-        for loop in first_edge.link_loops:
 
-            if loop.face == start_face:
-                current_face = loop.face
+def get_faces_between_edges(first_edge, second_edge, start_face=None):
+    '''
+    Find the connected faces and orders them based on the drawing order of the faces
+    '''
+    # print("=====================================")
+    start_face_index = start_face.index if start_face else None
+    # print("EDGES: ({0}, {1} Start face: {2})".format(first_edge.index, second_edge.index, start_face_index))
+    # let's find the shared vertex and the
+    connected_faces = []
+    is_ordered = first_edge.verts[1] in second_edge.verts
+    # print("Is ordered: {0}".format(is_ordered))
+    shared_vert = first_edge.verts[is_ordered]
+    current_face = None
+    for loop in first_edge.link_loops:
+
+        if loop.face == start_face:
+            current_face = loop.face
+            break
+    if current_face is None:
+        return connected_faces
+    if second_edge in current_face.edges:
+        # print("This is a corner face {0}".format(current_face.index))
+        return [current_face]
+
+    connected_faces.append(current_face)
+    shared_vert_faces = shared_vert.link_faces
+    counter = 0
+    while current_face:
+        if counter >= 10:
+            break
+        counter = +1
+        face_connected = []
+        face_connected = get_face_connected_faces(current_face)
+        # find the next face
+        next_face = None
+        for f in face_connected:
+            if f not in connected_faces and f in shared_vert_faces and first_edge not in f.edges:
+                next_face = f
                 break
-        if current_face is None:
-            return connected_faces
-        if second_edge in current_face.edges:
-            # print("This is a corner face {0}".format(current_face.index))
-            return [current_face]
 
-        connected_faces.append(current_face)
-        shared_vert_faces = shared_vert.link_faces
-        counter = 0
-        while current_face:
-            if counter >= 10:
-                break
-            counter = +1
-            face_connected = []
-            face_connected = self.get_face_connected_faces(current_face)
-            # find the next face
-            next_face = None
-            for f in face_connected:
-                if f not in connected_faces and f in shared_vert_faces and first_edge not in f.edges:
-                    next_face = f
-                    break
-
-            if next_face:
-                connected_faces.append(next_face)
-                if second_edge in next_face.edges:
-                    # this is the last face
-                    current_face = None
-                else:
-                    current_face = next_face
-            else:
+        if next_face:
+            connected_faces.append(next_face)
+            if second_edge in next_face.edges:
+                # this is the last face
                 current_face = None
+            else:
+                current_face = next_face
+        else:
+            current_face = None
 
-        return connected_faces
+    return connected_faces
 
-    @staticmethod
-    def get_face_connected_faces(face):
-        connected_faces = []
-        for edge in face.edges:
-            for link_face in edge.link_faces:
-                if link_face in connected_faces or link_face == face:
-                    continue
-                connected_faces.append(link_face)
-        return connected_faces
+def get_face_connected_faces(face):
+    connected_faces = []
+    for edge in face.edges:
+        for link_face in edge.link_faces:
+            if link_face in connected_faces or link_face == face:
+                continue
+            connected_faces.append(link_face)
+    return connected_faces
 
 
-    @staticmethod
-    def transform_vertices_array(array, mat):
-        verts_co_4d = np.ones(shape=(array.shape[0] , 4) , dtype=np.float32)
-        verts_co_4d[: , :-1] = array  # cos v (x,y,z,1) - point,   v(x,y,z,0)- vector
-        local_transferred_position = np.einsum ('ij,aj->ai' , mat , verts_co_4d)
-        return local_transferred_position[:, :3]
+def transform_vertices_array(array, mat):
+    verts_co_4d = np.ones(shape=(array.shape[0] , 4) , dtype=np.float32)
+    verts_co_4d[: , :-1] = array  # cos v (x,y,z,1) - point,   v(x,y,z,0)- vector
+    local_transferred_position = np.einsum ('ij,aj->ai' , mat , verts_co_4d)
+    return local_transferred_position[:, :3]
