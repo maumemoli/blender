@@ -217,13 +217,13 @@ class EdgeSequence(object):
         for co in self.parametric_coordinates:
             for i in range(len(uv_parametric_coords)-1):
                 current = uv_parametric_coords[i]
-                next = uv_parametric_coords[i + 1]
+                next = uv_parametric_coords[i+1]
                 if co >= current and co <= next:
                     # find the scale factor
                     scale_factor = (co - current) / (next - current)
                     # find the corresponding UV coordinates
-                    vector = (uv_coords[i + 1] - uv_coords[i]) * scale_factor
-                    uv = uv_coords[i] + vector
+                    vector = (uv_coords[i][1] - uv_coords[i][0]) * scale_factor
+                    uv = uv_coords[i][0] + vector
                     transferred_uv_coords.append(uv)
                     break
         # update the UV coordinates
@@ -311,36 +311,6 @@ class EdgeSequence(object):
         else:
             return False
 
-    @staticmethod
-    def inset_point(point, previous_point, next_point, inset_distance, normal=Vector((0.0, 0.0, 1.0))):
-        """
-        inset a point based on previous and next coordinates
-        """
-
-        # Compute edge vectors
-        edge1 = (point - previous_point).normalized()
-        edge2 = (next_point - point).normalized()
-
-        # Compute bisector direction
-        bisector = (edge1 + edge2).normalized()
-        print("Bisector")
-        print(bisector)
-        # Compute perpendicular in plane
-        perp = bisector.cross(normal).normalized()
-
-        print("Perpendicular")
-        print(perp)
-
-        if bisector == perp:
-            print("Bisector and Perp are equ")
-
-        # Compute correct inset distance using sine rule
-        angle = edge1.angle(-edge2) / 2  # Half of the inner angle
-        scale_factor = inset_distance / max(0.001, math.sin(angle))
-
-        # Compute inset position
-        inset_point = point + perp * scale_factor
-        return inset_point
 
 
     @staticmethod
@@ -350,46 +320,43 @@ class EdgeSequence(object):
         :return: True if the edge is a UV boundary, False otherwise
         '''
         if edge.is_boundary:
-            return True, True
+            return True
         half_edge_1 = edge.link_loops[0]
         half_edge_2 = edge.link_loops[1]
-        half_edge_1_border = False
-        half_edge_2_border = False
         if half_edge_1[uv_layer].uv != half_edge_2.link_loop_next[uv_layer].uv:
-            half_edge_1_border = True
-        if half_edge_2[uv_layer].uv != half_edge_1.link_loop_prev[uv_layer].uv:
-            half_edge_2_border = True
+            return True
+        elif half_edge_2[uv_layer].uv != half_edge_1.link_loop_prev[uv_layer].uv:
+            return True
+        else:
+            return False
 
-        return half_edge_1_border, half_edge_2_border
 
-
-
-    @staticmethod
-    def get_uv_coordinates(edges, faces, uv_layer):
+    def get_uv_coordinates(self, edges, faces, uv_layer, inset_distance=0.0):
         '''
         Get the UV coordinates of the edges filtered by the faces
         :return: The UV coordinates of the edges
         '''
         uv_coords = []
+        boundaries = list()
         for i in range(len(edges)):
             previous_edge = edges[i - 1] if i > 0 else None
             edge = edges[i]
             next_edge = edges[i + 1] if i + 1 < len(edges) else None
-            verts_boundaries = EdgeSequence.is_edge_uv_boundary(edge, uv_layer)
+            is_uv_boundary = self.is_edge_uv_boundary(edge, uv_layer)
             verts = [edge.verts[0], edge.verts[1]]
             if next_edge:
                 if verts[1] not in next_edge.verts:
                     verts = verts[::-1]
-                    verts_boundaries = verts_boundaries[::-1]
             elif previous_edge:
                 if verts[0] not in previous_edge.verts:
                     verts = verts[::-1]
-                    verts_boundaries = verts_boundaries[::-1]
+            verts_cords = []
             for vert in verts:
                 for loop in vert.link_loops:
                     if loop.face in faces:
-                        uv_coords.append(loop[uv_layer].uv)
+                        verts_cords.append(loop[uv_layer].uv)
                         break
+            uv_coords.append(verts_cords)
         return uv_coords
 
     def get_edges_faces_related_loops(self, edges, faces):
@@ -460,10 +427,7 @@ class EdgeSequence(object):
                 self.edges.append(next_edge)
                 next_edge = self.find_next_edge(next_edge)
         # let's find the edges to flip and the corner edges
-        if self.is_clockwise():
-            print("EDGES ARE ORDERED CLOCKWISE")
-        else:
-            print("EDGES ARE ORDERED COUNTERCLOCKWISE")
+
         self.corner_edges = [False] * len(self.edges)
         self.inverted_edges = [False] * len(self.edges)
         for i in range(len(self.edges)):
@@ -487,13 +451,21 @@ class EdgeSequence(object):
         '''
         Check if the edge sequence is clockwise or counterclockwise
         '''
+        
         if len(self.edges) < 2:
             print("CANNOT DETERMINE IS EDGE SEQUENCE IS CLOCKWISE OR COUNTERCLOCKWISE")
             return True
-        print("EDGE VERT 0 INDEX: {0}".format(self.edges[0].verts[0].index))
-        print("EDGE VERT 0 LINK LOOP NEXT: {0}".format(self.edges[0].link_loops[0].link_loop_next.vert.index))
-        if self.edges[0].link_loops[0].link_loop_next.vert == self.edges[1].link_loops[0].vert:
+        if self.is_border:
+            return False
+        shared_vert = [v for v in self.edges[0].verts if v in self.edges[1].verts][0]
+        if shared_vert == self.edges[0].link_loops[1].vert:
             return True
+        # print("EDGE VERT 0 INDEX: {0}".format(self.edges[0].verts[0].index))
+        # print("EDGE VERT 0 LINK LOOP NEXT: {0}".format(self.edges[0].link_loops[0].link_loop_next.vert.index))
+        # print("EDGE VERT 1 INDEX: {0}".format(self.edges[0].verts[1].index))
+        # print("EDGE VERT 1 LINK LOOP NEXT: {0}".format(self.edges[0].link_loops[1].link_loop_next.vert.index))
+        # if self.edges[0].link_loops[0].link_loop_next.vert == self.edges[1].link_loops[0].vert:
+        #     return True
         else:
             return False
 
@@ -541,6 +513,7 @@ class EdgeSequence(object):
         '''
         coordinates = []
         for i in range(len(edges)):
+            verts_coords = []
             next_edge = edges[i + 1] if i + 1 < len(edges) else None
             edge = edges[i]
             previous_edge = edges[i - 1] if i > 0 else None
@@ -551,9 +524,9 @@ class EdgeSequence(object):
             elif previous_edge:
                 if verts[0] not in previous_edge.verts:
                     verts = verts[::-1]
-            coordinates.append(verts[0].co.copy())
-            if i == len(edges) - 1:
-                coordinates.append(verts[1].co.copy())
+            verts_coords.append(verts[0].co.copy())
+            verts_coords.append(verts[1].co.copy())
+            coordinates.append(verts_coords)
         return coordinates
 
     @staticmethod
@@ -564,9 +537,9 @@ class EdgeSequence(object):
         """
         paramentric_coordinates = [0.0]
         total_length = 0.0
-        for i in range(1, len(coordinates)):
-            previous_coordinates = coordinates[i - 1]
-            current_coordinates = coordinates[i]
+        for i in range(len(coordinates)):
+            previous_coordinates = coordinates[i][0]
+            current_coordinates = coordinates[i][1]
             vector_length = (current_coordinates - previous_coordinates).length
             paramentric_coordinates.append(total_length + vector_length)
             total_length += vector_length
@@ -578,8 +551,8 @@ class EdgeSequence(object):
         Get the inner of the edge sequence
         :return:
         '''
-        start_loop_idx = 1 if self.inverted else 0
-        self.inner_faces = self.get_border_faces(start_loop_idx)
+        #start_loop_idx = 1 if self.inverted else 0
+        self.inner_faces = self.get_border_faces(self.is_clockwise())
 
     def get_outer_faces(self):
         '''
@@ -588,8 +561,8 @@ class EdgeSequence(object):
         '''
         if self.is_border:
             return []
-        start_loop_idx = 0 if self.inverted else 1
-        self.outer_faces = self.get_border_faces(start_loop_idx)
+        #start_loop_idx = 0 if self.inverted else 1
+        self.outer_faces = self.get_border_faces(not self.is_clockwise())  
 
     def get_border_faces(self, start_loop_idx=1):
         '''
@@ -697,3 +670,33 @@ def transform_vertices_array(array, mat):
     verts_co_4d[: , :-1] = array  # cos v (x,y,z,1) - point,   v(x,y,z,0)- vector
     local_transferred_position = np.einsum ('ij,aj->ai' , mat , verts_co_4d)
     return local_transferred_position[:, :3]
+
+def inset_point(point, previous_point, next_point, inset_distance, normal=Vector((0.0, 0.0, 1.0))):
+    """
+    inset a point based on previous and next coordinates
+    """
+
+    # Compute edge vectors
+    edge1 = (point - previous_point).normalized()
+    edge2 = (next_point - point).normalized()
+
+    # Compute bisector direction
+    bisector = (edge1 + edge2).normalized()
+    print("Bisector")
+    print(bisector)
+    # Compute perpendicular in plane
+    perp = bisector.cross(normal).normalized()
+
+    print("Perpendicular")
+    print(perp)
+
+    if bisector == perp:
+        print("Bisector and Perp are equ")
+
+    # Compute correct inset distance using sine rule
+    angle = edge1.angle(-edge2) / 2  # Half of the inner angle
+    scale_factor = inset_distance / max(0.001, math.sin(angle))
+
+    # Compute inset position
+    inset_point = point + perp * scale_factor
+    return inset_point
