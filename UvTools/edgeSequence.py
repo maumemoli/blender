@@ -2,6 +2,7 @@ import bpy
 import bmesh
 import numpy as np
 from mathutils import Vector
+import math
 
 class EdgePoint(object):
     def __init__(self, 
@@ -459,6 +460,10 @@ class EdgeSequence(object):
                 self.edges.append(next_edge)
                 next_edge = self.find_next_edge(next_edge)
         # let's find the edges to flip and the corner edges
+        if self.is_clockwise():
+            print("EDGES ARE ORDERED CLOCKWISE")
+        else:
+            print("EDGES ARE ORDERED COUNTERCLOCKWISE")
         self.corner_edges = [False] * len(self.edges)
         self.inverted_edges = [False] * len(self.edges)
         for i in range(len(self.edges)):
@@ -476,6 +481,21 @@ class EdgeSequence(object):
                 if current_edge.verts[1] in previous_edge.verts:
                     # print("This needs flipping")
                     self.inverted_edges[i] = True
+        # let's check if the edges are in a edgeloop clockwise or counterclockwise
+
+    def is_clockwise(self):
+        '''
+        Check if the edge sequence is clockwise or counterclockwise
+        '''
+        if len(self.edges) < 2:
+            print("CANNOT DETERMINE IS EDGE SEQUENCE IS CLOCKWISE OR COUNTERCLOCKWISE")
+            return True
+        print("EDGE VERT 0 INDEX: {0}".format(self.edges[0].verts[0].index))
+        print("EDGE VERT 0 LINK LOOP NEXT: {0}".format(self.edges[0].link_loops[0].link_loop_next.vert.index))
+        if self.edges[0].link_loops[0].link_loop_next.vert == self.edges[1].link_loops[0].vert:
+            return True
+        else:
+            return False
 
     def get_edges_batch_coords(self, edges):
         '''
