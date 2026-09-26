@@ -72,25 +72,7 @@ Copy the `MeshDataTransfer` directory into your Blender `scripts/addons` folder,
 
 The panel lives in **Object Data Properties** (`bpy.types.DATA_PT_mesh_data_transfer`) and is only shown when the active object is a mesh. It is collapsed by default.
 
-```
-┌─ Mesh Data Transfer ──────────────────────────────┐
-│  SEARCH METHOD                                    │
-│  [Closest] [Raycast] [Vertex ID] [Active UV]      │
-│                                                   │
-│  ATTRIBUTE TO TRANSFER                            │
-│  [Shape] [snap] [as key]   [UV set]               │
-│  [Shape Keys] [snap] [muted] [Vertex Groups] [lock]│
-│                                                   │
-│  Source: [ Object ] [World/Local] [Deformed]      │
-│  Vertex Group: [ group ] [invert]                 │
-│  [selection]  [ Transfer Mesh Data ]              │
-│                                                   │
-│  ▸ RIGGING HELPERS                                │
-│      Source Armature: [ ... ]                     │
-│      Target Armature: [ ... ]                     │
-│      [ Transfer Shape Keys drivers ]              │
-└───────────────────────────────────────────────────┘
-```
+![Mesh Data Transfer panel: search methods, attribute to transfer, source picker, vertex group filter and rigging helpers](ui.png)
 
 ### Search method row
 
@@ -298,7 +280,7 @@ The add-on is importable as a module, so the transfer logic can be reused in scr
 Wraps a single object's mesh and exposes helpers for reading/writing geometry.
 
 ```python
-from MeshDataTransfer.mesh_data_transfer import MeshData
+from MeshDataTransfer.core.mesh_data_transfer import MeshData
 
 md = MeshData(obj, deformed=False, world_space=False, uv_space=False, triangulate=True)
 md.get_mesh_data()          # builds vertex map + BVHTree
@@ -322,7 +304,7 @@ Key attributes/methods:
 The main transfer engine. Construction samples the target onto the source once; the `transfer_*` methods then write data.
 
 ```python
-from MeshDataTransfer.mesh_data_transfer import MeshDataTransfer
+from MeshDataTransfer.core.mesh_data_transfer import MeshDataTransfer
 
 transfer = MeshDataTransfer(
     target=target_obj,
@@ -383,7 +365,7 @@ Useful public state after construction:
 Orders a mesh's topology starting from the selected face and active edge. Used by topology-based mapping workflows.
 
 ```python
-from MeshDataTransfer.mesh_data_transfer import TopologyData
+from MeshDataTransfer.core.mesh_data_transfer import TopologyData
 
 topo = TopologyData(obj)
 face_verts = topo.get_face_vertices(0)
@@ -428,12 +410,23 @@ World-space transfers transform sampled points into the target's local space usi
 
 ```
 MeshDataTransfer/
-├── __init__.py              # UI panel, property group, registration
-├── operators.py             # Blender operators (transfer, drivers, topology)
-├── mesh_data_transfer.py    # Core transfer engine (MeshData, MeshDataTransfer, TopologyData)
-├── blender_manifest.toml    # Blender extension manifest
-└── README.md                # This documentation
+├── blender_manifest.toml      # Blender extension manifest (incl. build excludes)
+├── __init__.py                # UI panel, property group, registration
+├── LICENSE                    # GNU GPL v3
+├── core/
+│   ├── __init__.py            # Re-exports the public core classes
+│   └── mesh_data_transfer.py  # Core transfer engine (MeshData, MeshDataTransfer, TopologyData)
+├── operators/
+│   ├── __init__.py            # Re-exports the operators
+│   └── operators.py           # Blender operators (transfer, drivers, topology)
+└── documentation/
+    ├── README.md              # This documentation
+    └── ui.png                 # Panel screenshot
 ```
+
+> The `documentation/` folder (this README and `ui.png`) is kept in the
+> repository but excluded from the packaged extension through
+> `[build] paths_exclude_pattern` in `blender_manifest.toml`.
 
 ### Registration
 

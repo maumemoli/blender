@@ -1,6 +1,6 @@
 import bpy
 
-from .mesh_data_transfer import MeshDataTransfer, TopologyData
+from ..core.mesh_data_transfer import MeshDataTransfer, TopologyData
 
 
 class TransferShapeKeyDrivers(bpy.types.Operator):
