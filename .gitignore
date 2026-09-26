@@ -17,3 +17,6 @@ MeshDataTransferbk/link.bat
 /transfer_mesh_attributes.py
 /packages/faceit/
 transfer_vertex_order.py
+packages/MeshDataTransfer/documentation/blenderExstensionCover.png
+packages/MeshDataTransfer/documentation/icon.png
+packages/MeshDataTransfer/documentation/SUMMARY.md
