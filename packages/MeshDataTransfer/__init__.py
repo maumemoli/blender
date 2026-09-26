@@ -1,33 +1,9 @@
 
 import bpy
-# import os
-# script_dir = os.path.dirname(os.path.realpath(__file__))
-# import sys
-# sys.path.append(script_dir)
-# print("*****RELOADED*****")
-# from importlib import reload
-# import mesh_data_transfer as md
-# reload(md)
-# import operators as op
-# reload(op)
-# print("****************RELOADED MODULES**************")
 
-from bpy.types import (PropertyGroup)
-from bpy.props import (PointerProperty)
-from .operators import ( TransferShapeKeyDrivers, TransferMeshData, MapTopology)
-
-bl_info = {
-    "name" : "MeshDataTransfer",
-    "author" : "Maurizio Memoli",
-    "description" : "This add on will transfer geometry data from one mesh to another based on 3 different spaces:"
-                    " 'world, object, uv' also will tranfer UVs based on topology",
-    "blender" : (2, 93, 0),
-    "version" : (2, 0, 9,),
-    "location" : "(Object Mode) Mesh > ObjectData > Mesh Data Transfer ",
-    "warning" : "",
-    "wiki_url": "",
-    "category" : "Mesh"
-}
+from bpy.types import PropertyGroup
+from bpy.props import PointerProperty
+from .operators import TransferShapeKeyDrivers, TransferMeshData, MapTopology
 
 
 
@@ -55,54 +31,54 @@ def update_search_method (self, context):
 class MeshDataSettings(PropertyGroup):
     mesh_object_space: bpy.props.EnumProperty(
         items=[('WORLD', 'World', '', 1),('LOCAL', 'Local', '', 2)],
-        name="Object Space", default = 'LOCAL')
+        name="Object Space", default = 'LOCAL') # type: ignore
 
     gp_object_space: bpy.props.EnumProperty(
         items=[('WORLD', 'World', '', 1),('LOCAL', 'Local', '', 2)],
-        name="Object Space", default = 'LOCAL')
+        name="Object Space", default = 'LOCAL') # type: ignore
 
     search_method: bpy.props.EnumProperty(
         items=[('CLOSEST', 'Closest', "Closest Point on Surface Search Method", 1),
                ('RAYCAST', 'Raycast', "Bidirectional Projection Search Method", 2),
                ('TOPOLOGY', 'Topology', "Vertex ID or Topology Search Methood", 3)
                ,('UVS', 'Active UV', "Active UV Search Method", 4)],
-        name="Search method", default='CLOSEST' )
+        name="Search method", default='CLOSEST' )# type: ignore
 
     attributes_to_transfer: bpy.props.EnumProperty(
         items=[('SHAPE', 'Shape', '', 1),('UVS', 'UV set', '', 2),('SHAPE_KEYS', 'Shape Keys', '', 3)
                ,('VERTEX_GROUPS', 'Vertex Groups', '', 4)],
-        name="Attributes to to transfer", default = "SHAPE", update = update_search_method)
+        name="Attributes to to transfer", default = "SHAPE", update = update_search_method) # type: ignore
 
     mesh_source: bpy.props.PointerProperty(name="Source mesh", description= "Pick a source armature for transfer"
-                                           ,type=bpy.types.Object, poll=scene_chosenobject_poll)
+                                           ,type=bpy.types.Object, poll=scene_chosenobject_poll) # type: ignore
 
     arm_source: bpy.props.PointerProperty(name="Source armature", description= "Pick a target armature for transfer"
-                                           ,type=bpy.types.Object, poll=pick_armature)
+                                           ,type=bpy.types.Object, poll=pick_armature) # type: ignore
 
     arm_target: bpy.props.PointerProperty(name="Target armature", description= "Pick a source mesh for transfer"
-                                           ,type=bpy.types.Object, poll=pick_armature)
+                                           ,type=bpy.types.Object, poll=pick_armature) # type: ignore
 
     vertex_group_filter: bpy.props.StringProperty (name="Vertex Group",
-                                                   description="Filter transfer using a vertex group.")
-    invert_vertex_group_filter: bpy.props.BoolProperty (name= "Invert vertex group values")
+                                                   description="Filter transfer using a vertex group.") # type: ignore
+    invert_vertex_group_filter: bpy.props.BoolProperty (name= "Invert vertex group values") # type: ignore
     transfer_edit_selection: bpy.props.BoolProperty(name= "Only edit mode selection",
-                                                    description= "Restrict transfer to selection in edit mode")
+                                                    description= "Restrict transfer to selection in edit mode") # type: ignore
     transfer_shape_as_key : bpy.props.BoolProperty (name="Transfer as shape key",
-                                                    description="Transfer vertices position as a shape key")
-    transfer_to_new_uv : bpy.props.BoolProperty()
+                                                    description="Transfer vertices position as a shape key") # type: ignore
+    transfer_to_new_uv : bpy.props.BoolProperty() # type: ignore
 
     transfer_modified_source : bpy.props.BoolProperty (name="Transfer deformed source",
-                                                    description="Transfer the source mesh deformed by modifiers and shapeKeys")
+                                                    description="Transfer the source mesh deformed by modifiers and shapeKeys") # type: ignore
 
     exclude_muted_shapekeys : bpy.props.BoolProperty (name= "Exclude muted",
-                                                      description="Muted shape keys will not be transferred")
+                                                      description="Muted shape keys will not be transferred") # type: ignore
 
     exclude_locked_groups: bpy.props.BoolProperty (name= "Exclude locked",
-                                                   description="Locked vertex groups will not be transferred")
+                                                   description="Locked vertex groups will not be transferred") # type: ignore
     snap_to_closest_shape: bpy.props.BoolProperty (name="Snap shape to closest vertex",
-                                                   description="Snap transferred vertices to closest vertex on source mesh")
+                                                   description="Snap transferred vertices to closest vertex on source mesh") # type: ignore
     snap_to_closest_shapekey: bpy.props.BoolProperty (name="Snap shape key to closest vertex",
-                                                   description="Snap transferred shape keys vertices to closest vertex on source shape key")
+                                                   description="Snap transferred shape keys vertices to closest vertex on source shape key") # type: ignore
 
 
 
@@ -316,9 +292,10 @@ def unregister():
         # print (cl)
         bpy.utils.unregister_class (cl)
 
-    del bpy.types.Object.mesh_data_transfer_object
-    del bpy.types.Object.expanded
-    # del bpy.types.Scene.mesh_data_transfer_global
+    if hasattr(bpy.types.Object, "mesh_data_transfer_object"):
+        del bpy.types.Object.mesh_data_transfer_object
+    if hasattr(bpy.types.Object, "expanded"):
+        del bpy.types.Object.expanded
 
 if __name__ == "__main__":
     register()

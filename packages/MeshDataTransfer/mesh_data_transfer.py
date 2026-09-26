@@ -1,17 +1,9 @@
 import bmesh
 import bpy
-from mathutils import Vector
-import numpy as np
 import codecs
+import numpy as np
+from mathutils import Vector, kdtree
 from mathutils.bvhtree import BVHTree
-from mathutils import(Vector, Matrix, kdtree )
-from mathutils.geometry import (intersect_line_line, intersect_line_line_2d, intersect_point_line,
-                                intersect_line_plane, intersect_ray_tri, distance_point_to_plane, barycentric_transform )
-import sys
-
-
-
-import datetime
 '''
 MeshData:
     create_mesh_data:
@@ -91,9 +83,6 @@ class TopologyData (object):
 
         return rolled_face
 
-    # def get_shared_faces(self, face_id):
-    #     face_edges = self.get_face_edges(face_id)
-    #     for edge in face_edges:
 
     def get_data(self):
 
@@ -1172,9 +1161,7 @@ class MeshDataTransfer (object):
     # ================================================DEBUG=============================================================
     @staticmethod
     def create_debug_mesh(obj, co, name):
-        print(co.shape[0])
         copy = obj.data.copy()
-        print(len(copy.vertices))
         new_obj = bpy.data.objects.new(name , copy)
         bpy.context.scene.collection.objects.link (new_obj)
         copy.vertices.foreach_set("co", co.ravel())
