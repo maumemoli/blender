@@ -16,3 +16,4 @@ MeshDataTransferbk/link.bat
 /packages/installPackages.bat
 /transfer_mesh_attributes.py
 /packages/faceit/
+transfer_vertex_order.py
