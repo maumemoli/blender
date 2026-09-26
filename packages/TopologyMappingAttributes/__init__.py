@@ -1,6 +1,4 @@
 import bpy
-import bgl
-import blf
 import gpu
 import bmesh
 import os
@@ -10,16 +8,15 @@ import traceback
 from collections import deque
 from mathutils import Vector
 from bpy_extras.view3d_utils import (
-    region_2d_to_location_3d,
     region_2d_to_origin_3d,
     region_2d_to_vector_3d,
 )
 from gpu_extras.batch import batch_for_shader
-import mathutils
+
 bl_info = {
     "name": "Topology Mapping Attributes",
     "author": "Maurizio Memoli",
-    "version": (1, 1),
+    "version": (1, 2, 0),
     "blender": (4, 0, 0),
     "location": "Mesh",
     "description": "Create topology mapping attributes for vertex index sorting or symmetry detection",
@@ -31,7 +28,8 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
     Create topology mapping attributes for vertex index sorting or symmetry detection
     """
 
-    SORTED_INDICES_ATTR_NAME = "sorted_indices_from_face"
+    SORTED_VERTEX_INDICES_ATTR_NAME = "sorted_vertex_indices"
+    SORTED_FACE_INDICES_ATTR_NAME = "sorted_face_indices"
     SYMMETRY_INDICES_ATTR_NAME = "symmetry_indices"
 
     bl_idname = "mesh.create_topology_mapping_attributes"
@@ -394,12 +392,20 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
                                    test=False):
         """
         Create the symmetry attributes for the object
+        :param obj: The object to create the symmetry attributes for
+        :param face_index: The index of the face to start from
+        :param vertex_index: The index of the vertex in the face to start from
+        :param opposite_face_index: The index of the opposite face to start from
         """
-        obj_sorted_indices = self.sort_indices_from_face(obj, face_index, vertex_index)
-        opposite_obj_sorted_indices = self.sort_indices_from_face(obj,
-                                                                  opposite_face_index,
-                                                                  opposite_vertex_index,
-                                                                  True)
+        obj_sorted_indices, _ = self.sort_indices_from_face(obj = obj,
+                                                            start_face_index= face_index,
+                                                            face_vertex_index= vertex_index,
+                                                            flip_bmesh=False)
+
+        opposite_obj_sorted_indices, _ = self.sort_indices_from_face(obj = obj,
+                                                                     start_face_index= opposite_face_index,
+                                                                     face_vertex_index= opposite_vertex_index,
+                                                                     flip_bmesh= True)
         obj_sorted_indices = np.array(obj_sorted_indices, dtype=np.int32)
         opposite_obj_sorted_indices = np.array(opposite_obj_sorted_indices, dtype=np.int32)
 
@@ -444,18 +450,55 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         current_values[add_mask] = symmetry_vertices[add_mask]
         symmetry_attr.data.foreach_set("value", current_values)
 
-    def sort_meshes_indexes(self,
-                            source_obj,
-                            source_face_index,
-                            source_vertex_index,
-                            target_obj,
-                            target_face_index,
-                            target_vertex_index):
+    def map_source_to_target(self,
+                             source_obj,
+                             source_face_index,
+                             source_vertex_index,
+                             target_obj,
+                             target_face_index,
+                             target_vertex_index):
+        """
+        Map the source object vertex indices and face indices to the target object vertex indices and face indices.
+        :param source_obj: the source object to map from
+        :param source_face_index: the index of the face to start from in the source object
+        :param source_vertex_index: the index of the vertex in the face to start from in the source object
+        :param target_obj: the target object to map to
+        :param target_face_index: the index of the face to start from in the target object
+        :param target_vertex_index: the index of the vertex in the face to start from in the target object
+        :return: two numpy arrays with the remapped vertex indices and face indices
+        """
 
-        source_sorted_indices = self.sort_indices_from_face(source_obj, source_face_index, source_vertex_index)
-        target_sorted_indices = self.sort_indices_from_face(target_obj, target_face_index, target_vertex_index)
-        source_sorted_indices = np.array(source_sorted_indices, dtype=np.int32)
-        target_sorted_indices = np.array(target_sorted_indices, dtype=np.int32)
+        source_sorted_indices, source_sorted_faces = self.sort_indices_from_face(obj = source_obj,
+                                                                                 start_face_index= source_face_index,
+                                                                                 face_vertex_index= source_vertex_index)
+        target_sorted_indices, target_sorted_faces = self.sort_indices_from_face(obj = target_obj,
+                                                                                 start_face_index = target_face_index,
+                                                                                 face_vertex_index= target_vertex_index)
+        # let's get the onbjects vertex and face ids
+
+        print("Remapping Vertices {0} to {1}:".format(source_obj.name, target_obj.name))
+        remapped_vertex_indices = self.remap_arrays(source_sorted_indices, target_sorted_indices)
+        print("Remapping Faces {0} to {1}:".format(source_obj.name, target_obj.name))
+        remapped_faces_indices = self.remap_arrays(source_sorted_faces, target_sorted_faces)
+
+
+        return remapped_vertex_indices, remapped_faces_indices
+
+    @staticmethod
+    def remap_arrays(source, target):
+        """"
+        Remap the target array to the source one skipping the one with -1 values
+        Example:
+            source= [2,3,0,1]
+            target = [1,0,3,2]
+            result [3,2,1,0]
+        :param source: The Source array
+        :param target: The target array
+        :return the remapped numpy array
+        """
+
+        source_sorted_indices = np.array(source, dtype=np.int32)
+        target_sorted_indices = np.array(target, dtype=np.int32)
 
         # Initialize result array with -1
         result = np.full_like(source_sorted_indices, -1)
@@ -468,9 +511,10 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         target_indices = np.argsort(target_sorted_indices[np.isin(target_sorted_indices, source_sorted_indices[valid_values])])
 
         # Map values
-        result[np.where(valid_values)[0][source_indices]] = np.where(np.isin(target_sorted_indices, source_sorted_indices[valid_values]))[0][
-            target_indices]
-
+        result[np.where(valid_values)[0][source_indices]] = np.where(np.isin(target_sorted_indices,source_sorted_indices[valid_values]))[0][target_indices]
+        print("source: ", source)
+        print("target: ", target)
+        print("result: ", result.tolist())
         return result
 
     def create_reorder_attributes(self,
@@ -480,27 +524,49 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
                                   target_obj,
                                   target_face_index,
                                   target_vertex_index):
+
         source_mesh = source_obj.data
-        sorted_indices = self.sort_meshes_indexes(source_obj,
-                                                  source_face_index,
-                                                  source_vertex_index,
-                                                  target_obj,
-                                                  target_face_index,
-                                                  target_vertex_index)
+        v_idxs, f_idxs = self.map_source_to_target(source_obj = source_obj,
+                                                   source_face_index = source_face_index,
+                                                   source_vertex_index = source_vertex_index,
+                                                   target_obj = target_obj,
+                                                   target_face_index = target_face_index,
+                                                   target_vertex_index = target_vertex_index)
+        self.update_mesh_attribute(mesh=source_mesh,
+                                   values= v_idxs,
+                                   attribute_name=self.SORTED_VERTEX_INDICES_ATTR_NAME,
+                                   attribute_domain="POINT")
+
+        self.update_mesh_attribute(mesh=source_mesh,
+                                   values= f_idxs,
+                                   attribute_name=self.SORTED_FACE_INDICES_ATTR_NAME,
+                                   attribute_domain="FACE")
+
+    def update_mesh_attribute(self, mesh, values, attribute_name, attribute_domain):
+        """
+        Update or create a mesh attribute with the given values.
+        If the attribute already exists, if all the indices in value have -1 in current_value the function will combine
+        the values with the current values, otherwise it will reset all the other values to -1 and update the values.
+        :param mesh:
+        :param values:
+        :param attribute_name:
+        :param attribute_domain:
+        :return:
+        """
         # create an attribute to store the sorted indices for source_obj
-        source_attr = self.create_mesh_attr(source_mesh, self.SORTED_INDICES_ATTR_NAME, 'INT', 'POINT')
+        source_attr = self.create_mesh_attr(mesh, attribute_name, 'INT', attribute_domain)
         # get the existing values
         current_values = np.zeros(len(source_attr.data), dtype=np.int32)
         source_attr.data.foreach_get("value", current_values)
         # let's check if the sorted_indices valuer where is not -1 are going to replace current values with -1
         occupied_values = np.where(current_values != -1)[0]
         # if we are replacing existing values we reset all the other values to -1
-        if occupied_values.size > 0 and np.max(sorted_indices[occupied_values]) > -1:
+        if occupied_values.size > 0 and np.max(values[occupied_values]) > -1:
             # let's set all the values to -1
             current_values.fill(-1)
         # let's update the values
-        add_mask = np.where(sorted_indices != -1)[0]
-        current_values[add_mask] = sorted_indices[add_mask]
+        add_mask = np.where(values != -1)[0]
+        current_values[add_mask] = values[add_mask]
         source_attr.data.foreach_set("value", current_values)
 
     def cleanup(self):
@@ -584,7 +650,6 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         else:
             return mesh.attributes[attr_name]
 
-
     @staticmethod
     def sort_indices_from_face(obj, start_face_index, face_vertex_index, flip_bmesh=False):
         """
@@ -595,7 +660,8 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         :param start_face_index: Index of the face to start from.
         :param face_vertex_index: Index of the starting vertex in the face.
         :param flip_bmesh: If True, reverses the face orientation.
-        :return: List of sorted vertex indices.
+        :return: A tuple containing two lists: The first list contains the sorted vertex indices,
+                 and the second list contains the sorted face indices.
         """
         mesh = obj.data
         if obj.mode == 'EDIT':
@@ -609,6 +675,7 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         bm.faces.ensure_lookup_table()
         bm.verts.ensure_lookup_table()
 
+        sorted_faces = [-1] * len(bm.faces)
         sorted_indices = [-1] * len(bm.verts)
         # Find the starting face and loop
         start_face = bm.faces[start_face_index]
@@ -616,7 +683,7 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
 
         if start_loop is None:
             bm.free()
-            return sorted_indices  # Early exit if no valid starting loop is found
+            return sorted_indices, sorted_faces  # If the starting loop is not found, -1 will be returned for all indices
 
         if flip_bmesh:
             start_loop = start_loop.link_loop_prev
@@ -624,13 +691,17 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
         parsed_faces = set()  # Optimized lookup for processed faces
         connected_face_loops = deque([start_loop])  # Fast append/pop for traversal
 
+        current_face_index = 0
         vert_id = 0
         while connected_face_loops:
             face_loop = connected_face_loops.popleft()  # Faster pop from front
             face = face_loop.face
+            # Skip already parsed faces
             if face in parsed_faces:
                 continue
             parsed_faces.add(face)
+            sorted_faces[face.index] = current_face_index
+            current_face_index += 1
 
             # Iterate through the face loops to assign vertex indices
             end_face_loop = face_loop.link_loop_prev
@@ -653,7 +724,7 @@ class MESH_OT_create_topology_mapping_attributes(bpy.types.Operator):
                 current_face_loop = current_face_loop.link_loop_next
 
         bm.free()
-        return sorted_indices
+        return sorted_indices, sorted_faces
 
 def offset_face_vertices(vertices,  normal , offset_distance):
     """
