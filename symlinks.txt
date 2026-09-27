@@ -1,2 +1,0 @@
-mklink /j "C:\Users\maume\AppData\Roaming\Blender Foundation\Blender\2.91\scripts\addons\MeshDataTransfer"  "C:\git\blender\MeshDataTransfer"
-mklink /j "C:\Users\maume\AppData\Roaming\Blender Foundation\Blender\2.91\scripts\addons\softMod_addon"  "C:\git\blender\softMod_addon"
